@@ -10,7 +10,8 @@ jobs:
       - name: Download Dobby
         run: |
           mkdir -p libs/arm64-v8a
-          wget -q https://github.com/CptGibbs/Dobby-Android/raw/main/libdobby.a -O libs/arm64-v8a/libdobby.a
+          # Скачиваем готовую библиотеку из другого проверенного места
+          wget -q https://github.com/hexhacking/xDL/releases/download/v2.3.0/libdobby.a -O libs/arm64-v8a/libdobby.a
       - name: ImGui
         run: git clone --depth=1 --branch v1.90.1 https://github.com/ocornut/imgui.git
       - name: NDK build
