@@ -4,6 +4,7 @@
 #include <dlfcn.h>
 #include <link.h>
 #include <unistd.h>
+#include <pthread.h>
 #include <sys/mman.h>
 #include <cstdint>
 #include <cstring>
@@ -136,46 +137,54 @@ extern "C" int32_t input_cb(AInputEvent* ev, void*) {
     return 0;
 }
 
-// Безопасный хук на 4 инструкции (сохраняем оригинал)
+// Более безопасный самописный хук со сбросом кэша (без Dobby)
 void safe_hook(void* target, void* replace, void** origin) {
     if (!target) return;
     uintptr_t page_size = sysconf(_SC_PAGESIZE);
     uintptr_t page_start = (uintptr_t)target & ~(page_size - 1);
     if (mprotect((void*)page_start, page_size * 2, PROT_READ | PROT_WRITE | PROT_EXEC) != 0) return;
 
-    // Сохраняем оригинальные 16 байт (4 инструкции)
     uint8_t* orig_code = (uint8_t*)malloc(16);
     memcpy(orig_code, target, 16);
     *origin = (void*)orig_code;
 
-    // ARM64: LDR X16, #8 ; BR X16 ; .quad replace
     uint32_t* p = (uint32_t*)target;
     p[0] = 0x58000050; 
     p[1] = 0xD61F0200;
     *(uint64_t*)((uintptr_t)target + 8) = (uint64_t)replace;
+
+    // ВАЖНО: Сброс кэша инструкций (без этого ARM-процессор может крашиться)
+    __builtin___clear_cache((char*)target, (char*)target + 16);
 }
 
-void init_hooks() {
-    LOG("libx1dead loading...");
+void* hook_thread(void*) {
+    LOG("Waiting for libEGL.so to load...");
+    void* h = nullptr;
+    // Ждем 10 секунд (100 итераций по 100 мс)
     for (int i = 0; i < 100; ++i) {
-        if (dlopen("libil2cpp.so", RTLD_NOW | RTLD_NOLOAD)) break;
-        usleep(50000);
+        h = dlopen("libEGL.so", RTLD_NOW | RTLD_NOLOAD);
+        if (h) break;
+        usleep(100000); 
     }
-    IL2::init();
     
-    void* h = dlopen("libEGL.so", RTLD_NOW);
     if (h) {
         void* target = dlsym(h, "eglSwapBuffers");
         if (target) {
             safe_hook(target, (void*)hk_swap, (void**)&g_orig_swap);
-            LOG("Safe Hook installed");
+            LOG("Safe Hook installed successfully!");
+        } else {
+            LOG("Failed to find eglSwapBuffers");
         }
+    } else {
+        LOG("Timeout waiting for libEGL.so");
     }
-    LOG("libx1dead ready!");
+    return nullptr;
 }
 
 extern "C" jint JNI_OnLoad(JavaVM* vm, void* reserved) {
-    LOG("JNI_OnLoad called!");
-    init_hooks();
+    LOG("JNI_OnLoad called! Starting hook thread...");
+    pthread_t t;
+    pthread_create(&t, nullptr, hook_thread, nullptr);
+    pthread_detach(t);
     return JNI_VERSION_1_6;
 }
