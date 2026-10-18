@@ -144,12 +144,14 @@ void inline_hook(void* target, void* replace, void** origin) {
     if (mprotect((void*)page_start, page_size * 2, PROT_READ | PROT_WRITE | PROT_EXEC) != 0) return;
 
     uint32_t* p = (uint32_t*)target;
-    *origin = (void*)((uintptr_t)target + 16); // Сохраняем оригинал (упрощенно)
+    *origin = (void*)((uintptr_t)target + 16);
 
     // ARM64: LDR X16, #8 ; BR X16 ; .quad replace
     p[0] = 0x58000050; 
     p[1] = 0xD61F0200;
-    *(uint64_t*)(target + 8) = (uint64_t)replace;
+    
+    // ИСПРАВЛЕНО ЗДЕСЬ: добавлено (uintptr_t)
+    *(uint64_t*)((uintptr_t)target + 8) = (uint64_t)replace;
 }
 
 __attribute__((constructor))
