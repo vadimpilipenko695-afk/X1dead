@@ -4,6 +4,7 @@
 #include <dlfcn.h>
 #include <link.h>
 #include <unistd.h>
+#include <pthread.h>
 #include <sys/mman.h>
 #include <cstdint>
 #include <cstring>
@@ -153,24 +154,30 @@ void safe_hook(void* target, void* replace, void** origin) {
     __builtin___clear_cache((char*)target, (char*)target + 16);
 }
 
-extern "C" jint JNI_OnLoad(JavaVM* vm, void* reserved) {
-    LOG("JNI_OnLoad called! Waiting 10 seconds for game to load...");
-    
-    // Просто ждем 10 секунд прямо в потоке, без создания новых потоков (pthread)
-    sleep(10); 
-
-    LOG("Finding libEGL.so...");
-    void* h = dlopen("libEGL.so", RTLD_NOW | RTLD_NOLOAD);
-    if (!h) h = dlopen("libEGL.so", RTLD_NOW);
-
-    if (h) {
-        void* target = dlsym(h, "eglSwapBuffers");
-        if (target) {
-            safe_hook(target, (void*)hk_swap, (void**)&g_orig_swap);
-            LOG("Safe Hook installed successfully!");
+// Поток, который ждет загрузки игры
+void* wait_for_egl(void*) {
+    for (int i = 0; i < 300; ++i) { // Ждем до 30 секунд
+        void* h = dlopen("libEGL.so", RTLD_NOW | RTLD_NOLOAD);
+        if (h) {
+            void* target = dlsym(h, "eglSwapBuffers");
+            if (target) {
+                safe_hook(target, (void*)hk_swap, (void**)&g_orig_swap);
+                LOG("Hook installed successfully!");
+                return nullptr;
+            }
         }
+        sleep(1); // Ждем 1 секунду перед следующей проверкой
     }
+    LOG("Timeout waiting for libEGL");
+    return nullptr;
+}
+
+extern "C" jint JNI_OnLoad(JavaVM* vm, void* reserved) {
+    LOG("JNI_OnLoad called! Spawning wait thread...");
     
-    LOG("libx1dead ready!");
+    pthread_t t;
+    pthread_create(&t, nullptr, wait_for_egl, nullptr);
+    pthread_detach(t);
+
     return JNI_VERSION_1_6;
 }
