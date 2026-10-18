@@ -10,6 +10,7 @@
 #include <cstdlib>
 #include <EGL/egl.h>
 #include <GLES3/gl3.h>
+#include <dobby.h>
 #include "imgui/imgui.h"
 #include "imgui/backends/imgui_impl_opengl3.h"
 #include "imgui/backends/imgui_impl_android.h"
@@ -86,7 +87,6 @@ void apply_win(int score) {
 
 bool g_menu = false;
 int g_score = 8;
-bool g_hook_installed = false;
 
 typedef EGLBoolean (*SwapFn)(EGLDisplay, EGLSurface);
 SwapFn g_orig_swap = nullptr;
@@ -108,10 +108,10 @@ EGLBoolean hk_swap(EGLDisplay d, EGLSurface s) {
     ImGui_ImplAndroid_NewFrame();
     ImGui::NewFrame();
 
-    // Рисуем плавающую кнопку (иконку)
-    ImGui::SetNextWindowPos(ImVec2(20, 100), ImGuiCond_Always);
+    // Плавающая кнопка (иконка) в левом нижнем углу
+    ImGui::SetNextWindowPos(ImVec2(20, 200), ImGuiCond_Always);
     ImGui::SetNextWindowSize(ImVec2(60, 60), ImGuiCond_Always);
-    ImGui::Begin("##floating_btn", nullptr, ImGuiWindowFlags_NoTitleBar | ImGuiWindowFlags_NoResize | ImGuiWindowFlags_NoScrollbar | ImGuiWindowFlags_NoMove | ImGuiWindowFlags_NoBackground);
+    ImGui::Begin("##btn", nullptr, ImGuiWindowFlags_NoTitleBar | ImGuiWindowFlags_NoResize | ImGuiWindowFlags_NoScrollbar | ImGuiWindowFlags_NoMove | ImGuiWindowFlags_NoBackground);
     if (ImGui::Button("X1", ImVec2(60, 60))) {
         g_menu = !g_menu;
     }
@@ -136,53 +136,23 @@ EGLBoolean hk_swap(EGLDisplay d, EGLSurface s) {
     return g_orig_swap ? g_orig_swap(d, s) : EGL_FALSE;
 }
 
-void safe_hook(void* target, void* replace, void** origin) {
-    if (!target) return;
-    uintptr_t page_size = sysconf(_SC_PAGESIZE);
-    uintptr_t page_start = (uintptr_t)target & ~(page_size - 1);
-    if (mprotect((void*)page_start, page_size * 2, PROT_READ | PROT_WRITE | PROT_EXEC) != 0) return;
-
-    uint8_t* orig_code = (uint8_t*)malloc(16);
-    memcpy(orig_code, target, 16);
-    *origin = (void*)orig_code;
-
-    uint32_t* p = (uint32_t*)target;
-    p[0] = 0x58000050; 
-    p[1] = 0xD61F0200;
-    *(uint64_t*)((uintptr_t)target + 8) = (uint64_t)replace;
-    __builtin___clear_cache((char*)target, (char*)target + 16);
-}
-
-typedef void* (*GetInstFn)(void*);
-GetInstFn orig_get_inst = nullptr;
-
-void* hk_get_inst(void* method) {
-    void* result = orig_get_inst(method);
-    
-    if (!g_hook_installed) {
-        void* h = dlopen("libEGL.so", RTLD_NOW | RTLD_NOLOAD);
-        if (h) {
-            void* target = dlsym(h, "eglSwapBuffers");
-            if (target) {
-                safe_hook(target, (void*)hk_swap, (void**)&g_orig_swap);
-                g_hook_installed = true;
-                LOG("Hooked eglSwapBuffers successfully!");
-            }
-        }
-    }
-    return result;
+extern "C" int32_t input_cb(AInputEvent* ev, void*) {
+    if (AInputEvent_getType(ev) != AINPUT_EVENT_TYPE_MOTION) return 0;
+    return 0;
 }
 
 extern "C" jint JNI_OnLoad(JavaVM* vm, void* reserved) {
     LOG("JNI_OnLoad called!");
     
     if (IL2::init()) {
-        LOG("il2cpp base: %p", (void*)IL2::base);
-        void* target = IL2::at(O::GameController_get_Instance);
-        safe_hook(target, (void*)hk_get_inst, (void**)&orig_get_inst);
-        LOG("GameController Hook installed!");
-    } else {
-        LOG("Failed to find il2cpp");
+        void* h = dlopen("libEGL.so", RTLD_NOW);
+        if (h) {
+            void* target = dlsym(h, "eglSwapBuffers");
+            if (target) {
+                DobbyHook(target, (void*)hk_swap, (void**)&g_orig_swap);
+                LOG("Dobby Hook installed successfully!");
+            }
+        }
     }
     
     return JNI_VERSION_1_6;
