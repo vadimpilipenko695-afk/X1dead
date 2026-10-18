@@ -4,7 +4,6 @@
 #include <dlfcn.h>
 #include <link.h>
 #include <unistd.h>
-#include <pthread.h>
 #include <sys/mman.h>
 #include <cstdint>
 #include <cstring>
@@ -88,53 +87,24 @@ void apply_win(int score) {
 bool g_menu = false;
 int g_score = 8;
 
-typedef EGLBoolean (*SwapFn)(EGLDisplay, EGLSurface);
-SwapFn g_orig_swap = nullptr;
-bool g_imgui_ready = false;
+// Хук на GameController.get_Instance()
+typedef void* (*GetInstFn)(void*);
+GetInstFn orig_get_inst = nullptr;
 
-EGLBoolean hk_swap(EGLDisplay d, EGLSurface s) {
-    if (!g_imgui_ready) {
-        IMGUI_CHECKVERSION();
-        ImGui::CreateContext();
-        ImGui::GetIO().IniFilename = nullptr;
-        ImGui::StyleColorsDark();
-        ImGui_ImplOpenGL3_Init("#version 300 es");
-        ImGui_ImplAndroid_Init(nullptr);
-        g_imgui_ready = true;
-        LOG("ImGui Ready");
+void* hk_get_inst(void* method) {
+    // Вызываем оригинал
+    void* result = orig_get_inst(method);
+    
+    // Если игра загрузилась, рисуем меню (один раз)
+    static bool imgui_initialized = false;
+    if (!imgui_initialized && result != nullptr) {
+        // Здесь мы не можем рисовать напрямую, так как не в контексте GL
+        // Но мы можем сохранить указатель на GameController и делать действие по кнопке
+        imgui_initialized = true;
+        LOG("GameController ready! Hook works.");
     }
-
-    ImGui_ImplOpenGL3_NewFrame();
-    ImGui_ImplAndroid_NewFrame();
-    ImGui::NewFrame();
-
-    if (g_menu) {
-        ImGui::SetNextWindowSize(ImVec2(300, 150), ImGuiCond_FirstUseEver);
-        ImGui::Begin("by.x1dead", nullptr, ImGuiWindowFlags_NoCollapse);
-        
-        ImGui::Text("StandRise AutoWin");
-        ImGui::Separator();
-        ImGui::SliderInt("Score", &g_score, 1, 16);
-        if (ImGui::Button("WIN NOW", ImVec2(280, 50))) {
-            apply_win(g_score);
-        }
-        ImGui::End();
-    }
-
-    ImGui::Render();
-    ImGui_ImplOpenGL3_RenderDrawData(ImGui::GetDrawData());
-
-    return g_orig_swap ? g_orig_swap(d, s) : EGL_FALSE;
-}
-
-extern "C" int32_t input_cb(AInputEvent* ev, void*) {
-    if (AInputEvent_getType(ev) != AINPUT_EVENT_TYPE_MOTION) return 0;
-    int32_t a = AMotionEvent_getAction(ev);
-    int32_t action = a & AMOTION_EVENT_ACTION_MASK;
-    if (action == AMOTION_EVENT_ACTION_POINTER_DOWN && AMotionEvent_getPointerCount(ev) >= 3) {
-        g_menu = !g_menu;
-    }
-    return 0;
+    
+    return result;
 }
 
 void safe_hook(void* target, void* replace, void** origin) {
@@ -154,30 +124,19 @@ void safe_hook(void* target, void* replace, void** origin) {
     __builtin___clear_cache((char*)target, (char*)target + 16);
 }
 
-// Поток, который ждет загрузки игры
-void* wait_for_egl(void*) {
-    for (int i = 0; i < 300; ++i) { // Ждем до 30 секунд
-        void* h = dlopen("libEGL.so", RTLD_NOW | RTLD_NOLOAD);
-        if (h) {
-            void* target = dlsym(h, "eglSwapBuffers");
-            if (target) {
-                safe_hook(target, (void*)hk_swap, (void**)&g_orig_swap);
-                LOG("Hook installed successfully!");
-                return nullptr;
-            }
-        }
-        sleep(1); // Ждем 1 секунду перед следующей проверкой
-    }
-    LOG("Timeout waiting for libEGL");
-    return nullptr;
-}
-
 extern "C" jint JNI_OnLoad(JavaVM* vm, void* reserved) {
-    LOG("JNI_OnLoad called! Spawning wait thread...");
+    LOG("JNI_OnLoad called!");
     
-    pthread_t t;
-    pthread_create(&t, nullptr, wait_for_egl, nullptr);
-    pthread_detach(t);
-
-    return JNI_VERSION_1_6;
+    // Ищем libil2cpp.so, который уже загружен
+    if (IL2::init()) {
+        LOG("il2cpp base: %p", (void*)IL2::base);
+        // Хукаем GameController.get_Instance
+        void* target = IL2::at(O::GameController_get_Instance);
+        safe_hook(target, (void*)hk_get_inst, (void**)&orig_get_inst);
+        LOG("GameController Hook installed!");
+    } else {
+        LOG("Failed to find il2cpp");
+    }
+    
+    return JNI_VERSION_1_6; // Возвращаем валидную версию
 }
