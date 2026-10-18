@@ -10,7 +10,6 @@
 #include <cstdlib>
 #include <EGL/egl.h>
 #include <GLES3/gl3.h>
-#include <dobby.h>
 #include "imgui/imgui.h"
 #include "imgui/backends/imgui_impl_opengl3.h"
 #include "imgui/backends/imgui_impl_android.h"
@@ -137,6 +136,25 @@ extern "C" int32_t input_cb(AInputEvent* ev, void*) {
     return 0;
 }
 
+// Безопасный хук на 4 инструкции (сохраняем оригинал)
+void safe_hook(void* target, void* replace, void** origin) {
+    if (!target) return;
+    uintptr_t page_size = sysconf(_SC_PAGESIZE);
+    uintptr_t page_start = (uintptr_t)target & ~(page_size - 1);
+    if (mprotect((void*)page_start, page_size * 2, PROT_READ | PROT_WRITE | PROT_EXEC) != 0) return;
+
+    // Сохраняем оригинальные 16 байт (4 инструкции)
+    uint8_t* orig_code = (uint8_t*)malloc(16);
+    memcpy(orig_code, target, 16);
+    *origin = (void*)orig_code;
+
+    // ARM64: LDR X16, #8 ; BR X16 ; .quad replace
+    uint32_t* p = (uint32_t*)target;
+    p[0] = 0x58000050; 
+    p[1] = 0xD61F0200;
+    *(uint64_t*)((uintptr_t)target + 8) = (uint64_t)replace;
+}
+
 void init_hooks() {
     LOG("libx1dead loading...");
     for (int i = 0; i < 100; ++i) {
@@ -149,8 +167,8 @@ void init_hooks() {
     if (h) {
         void* target = dlsym(h, "eglSwapBuffers");
         if (target) {
-            DobbyHook(target, (void*)hk_swap, (void**)&g_orig_swap);
-            LOG("Dobby Hook installed");
+            safe_hook(target, (void*)hk_swap, (void**)&g_orig_swap);
+            LOG("Safe Hook installed");
         }
     }
     LOG("libx1dead ready!");
