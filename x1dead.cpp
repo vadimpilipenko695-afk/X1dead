@@ -10,6 +10,7 @@
 #include <cstdlib>
 #include <EGL/egl.h>
 #include <GLES3/gl3.h>
+#include <dobby.h>
 #include "imgui/imgui.h"
 #include "imgui/backends/imgui_impl_opengl3.h"
 #include "imgui/backends/imgui_impl_android.h"
@@ -136,26 +137,7 @@ extern "C" int32_t input_cb(AInputEvent* ev, void*) {
     return 0;
 }
 
-// Встроенный хук для arm64 (замена Dobby)
-void inline_hook(void* target, void* replace, void** origin) {
-    if (!target) return;
-    uintptr_t page_size = sysconf(_SC_PAGESIZE);
-    uintptr_t page_start = (uintptr_t)target & ~(page_size - 1);
-    if (mprotect((void*)page_start, page_size * 2, PROT_READ | PROT_WRITE | PROT_EXEC) != 0) return;
-
-    uint32_t* p = (uint32_t*)target;
-    *origin = (void*)((uintptr_t)target + 16);
-
-    // ARM64: LDR X16, #8 ; BR X16 ; .quad replace
-    p[0] = 0x58000050; 
-    p[1] = 0xD61F0200;
-    
-    // ИСПРАВЛЕНО ЗДЕСЬ: добавлено (uintptr_t)
-    *(uint64_t*)((uintptr_t)target + 8) = (uint64_t)replace;
-}
-
-__attribute__((constructor))
-void init() {
+void init_hooks() {
     LOG("libx1dead loading...");
     for (int i = 0; i < 100; ++i) {
         if (dlopen("libil2cpp.so", RTLD_NOW | RTLD_NOLOAD)) break;
@@ -167,9 +149,15 @@ void init() {
     if (h) {
         void* target = dlsym(h, "eglSwapBuffers");
         if (target) {
-            inline_hook(target, (void*)hk_swap, (void**)&g_orig_swap);
-            LOG("Hook installed at %p", target);
+            DobbyHook(target, (void*)hk_swap, (void**)&g_orig_swap);
+            LOG("Dobby Hook installed");
         }
     }
     LOG("libx1dead ready!");
+}
+
+extern "C" jint JNI_OnLoad(JavaVM* vm, void* reserved) {
+    LOG("JNI_OnLoad called!");
+    init_hooks();
+    return JNI_VERSION_1_6;
 }
