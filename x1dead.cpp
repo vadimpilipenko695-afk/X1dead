@@ -87,23 +87,80 @@ void apply_win(int score) {
 bool g_menu = false;
 int g_score = 8;
 
-// Хук на GameController.get_Instance()
+// ======== ImGui ========
+typedef EGLBoolean (*SwapFn)(EGLDisplay, EGLSurface);
+SwapFn g_orig_swap = nullptr;
+bool g_imgui_ready = false;
+bool g_hook_installed = false;
+
+EGLBoolean hk_swap(EGLDisplay d, EGLSurface s) {
+    if (!g_imgui_ready) {
+        IMGUI_CHECKVERSION();
+        ImGui::CreateContext();
+        ImGui::GetIO().IniFilename = nullptr;
+        ImGui::StyleColorsDark();
+        ImGui_ImplOpenGL3_Init("#version 300 es");
+        ImGui_ImplAndroid_Init(nullptr);
+        g_imgui_ready = true;
+        LOG("ImGui Ready");
+    }
+
+    ImGui_ImplOpenGL3_NewFrame();
+    ImGui_ImplAndroid_NewFrame();
+    ImGui::NewFrame();
+
+    if (g_menu) {
+        ImGui::SetNextWindowSize(ImVec2(300, 150), ImGuiCond_FirstUseEver);
+        ImGui::Begin("by.x1dead", nullptr, ImGuiWindowFlags_NoCollapse);
+        
+        ImGui::Text("StandRise AutoWin");
+        ImGui::Separator();
+        ImGui::SliderInt("Score", &g_score, 1, 16);
+        if (ImGui::Button("WIN NOW", ImVec2(280, 50))) {
+            apply_win(g_score);
+        }
+        ImGui::End();
+    }
+
+    ImGui::Render();
+    ImGui_ImplOpenGL3_RenderDrawData(ImGui::GetDrawData());
+
+    return g_orig_swap ? g_orig_swap(d, s) : EGL_FALSE;
+}
+
+// Хук на GameController.get_Instance() (вызывается, когда игра уже загружена)
 typedef void* (*GetInstFn)(void*);
 GetInstFn orig_get_inst = nullptr;
 
 void* hk_get_inst(void* method) {
-    // Вызываем оригинал
     void* result = orig_get_inst(method);
     
-    // Если игра загрузилась, рисуем меню (один раз)
-    static bool imgui_initialized = false;
-    if (!imgui_initialized && result != nullptr) {
-        // Здесь мы не можем рисовать напрямую, так как не в контексте GL
-        // Но мы можем сохранить указатель на GameController и делать действие по кнопке
-        imgui_initialized = true;
-        LOG("GameController ready! Hook works.");
+    // Если игра уже загружена и EGL есть, вешаем хук на swap (только один раз)
+    if (!g_hook_installed && result != nullptr) {
+        void* h = dlopen("libEGL.so", RTLD_NOW | RTLD_NOLOAD);
+        if (h) {
+            void* target = dlsym(h, "eglSwapBuffers");
+            if (target) {
+                // Хукаем через safe_hook
+                uintptr_t page_size = sysconf(_SC_PAGESIZE);
+                uintptr_t page_start = (uintptr_t)target & ~(page_size - 1);
+                if (mprotect((void*)page_start, page_size * 2, PROT_READ | PROT_WRITE | PROT_EXEC) == 0) {
+                    uint8_t* orig_code = (uint8_t*)malloc(16);
+                    memcpy(orig_code, target, 16);
+                    g_orig_swap = (SwapFn)orig_code;
+                    
+                    uint32_t* p = (uint32_t*)target;
+                    p[0] = 0x58000050; 
+                    p[1] = 0xD61F0200;
+                    *(uint64_t*)((uintptr_t)target + 8) = (uint64_t)hk_swap;
+                    __builtin___clear_cache((char*)target, (char*)target + 16);
+                    
+                    g_hook_installed = true;
+                    LOG("Hooked eglSwapBuffers successfully!");
+                }
+            }
+        }
     }
-    
     return result;
 }
 
@@ -127,7 +184,6 @@ void safe_hook(void* target, void* replace, void** origin) {
 extern "C" jint JNI_OnLoad(JavaVM* vm, void* reserved) {
     LOG("JNI_OnLoad called!");
     
-    // Ищем libil2cpp.so, который уже загружен
     if (IL2::init()) {
         LOG("il2cpp base: %p", (void*)IL2::base);
         // Хукаем GameController.get_Instance
@@ -138,5 +194,5 @@ extern "C" jint JNI_OnLoad(JavaVM* vm, void* reserved) {
         LOG("Failed to find il2cpp");
     }
     
-    return JNI_VERSION_1_6; // Возвращаем валидную версию
+    return JNI_VERSION_1_6;
 }
