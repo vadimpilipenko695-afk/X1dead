@@ -86,12 +86,11 @@ void apply_win(int score) {
 
 bool g_menu = false;
 int g_score = 8;
+bool g_hook_installed = false;
 
-// ======== ImGui ========
 typedef EGLBoolean (*SwapFn)(EGLDisplay, EGLSurface);
 SwapFn g_orig_swap = nullptr;
 bool g_imgui_ready = false;
-bool g_hook_installed = false;
 
 EGLBoolean hk_swap(EGLDisplay d, EGLSurface s) {
     if (!g_imgui_ready) {
@@ -108,6 +107,15 @@ EGLBoolean hk_swap(EGLDisplay d, EGLSurface s) {
     ImGui_ImplOpenGL3_NewFrame();
     ImGui_ImplAndroid_NewFrame();
     ImGui::NewFrame();
+
+    // Рисуем плавающую кнопку (иконку)
+    ImGui::SetNextWindowPos(ImVec2(20, 100), ImGuiCond_Always);
+    ImGui::SetNextWindowSize(ImVec2(60, 60), ImGuiCond_Always);
+    ImGui::Begin("##floating_btn", nullptr, ImGuiWindowFlags_NoTitleBar | ImGuiWindowFlags_NoResize | ImGuiWindowFlags_NoScrollbar | ImGuiWindowFlags_NoMove | ImGuiWindowFlags_NoBackground);
+    if (ImGui::Button("X1", ImVec2(60, 60))) {
+        g_menu = !g_menu;
+    }
+    ImGui::End();
 
     if (g_menu) {
         ImGui::SetNextWindowSize(ImVec2(300, 150), ImGuiCond_FirstUseEver);
@@ -128,42 +136,6 @@ EGLBoolean hk_swap(EGLDisplay d, EGLSurface s) {
     return g_orig_swap ? g_orig_swap(d, s) : EGL_FALSE;
 }
 
-// Хук на GameController.get_Instance() (вызывается, когда игра уже загружена)
-typedef void* (*GetInstFn)(void*);
-GetInstFn orig_get_inst = nullptr;
-
-void* hk_get_inst(void* method) {
-    void* result = orig_get_inst(method);
-    
-    // Если игра уже загружена и EGL есть, вешаем хук на swap (только один раз)
-    if (!g_hook_installed && result != nullptr) {
-        void* h = dlopen("libEGL.so", RTLD_NOW | RTLD_NOLOAD);
-        if (h) {
-            void* target = dlsym(h, "eglSwapBuffers");
-            if (target) {
-                // Хукаем через safe_hook
-                uintptr_t page_size = sysconf(_SC_PAGESIZE);
-                uintptr_t page_start = (uintptr_t)target & ~(page_size - 1);
-                if (mprotect((void*)page_start, page_size * 2, PROT_READ | PROT_WRITE | PROT_EXEC) == 0) {
-                    uint8_t* orig_code = (uint8_t*)malloc(16);
-                    memcpy(orig_code, target, 16);
-                    g_orig_swap = (SwapFn)orig_code;
-                    
-                    uint32_t* p = (uint32_t*)target;
-                    p[0] = 0x58000050; 
-                    p[1] = 0xD61F0200;
-                    *(uint64_t*)((uintptr_t)target + 8) = (uint64_t)hk_swap;
-                    __builtin___clear_cache((char*)target, (char*)target + 16);
-                    
-                    g_hook_installed = true;
-                    LOG("Hooked eglSwapBuffers successfully!");
-                }
-            }
-        }
-    }
-    return result;
-}
-
 void safe_hook(void* target, void* replace, void** origin) {
     if (!target) return;
     uintptr_t page_size = sysconf(_SC_PAGESIZE);
@@ -181,12 +153,31 @@ void safe_hook(void* target, void* replace, void** origin) {
     __builtin___clear_cache((char*)target, (char*)target + 16);
 }
 
+typedef void* (*GetInstFn)(void*);
+GetInstFn orig_get_inst = nullptr;
+
+void* hk_get_inst(void* method) {
+    void* result = orig_get_inst(method);
+    
+    if (!g_hook_installed) {
+        void* h = dlopen("libEGL.so", RTLD_NOW | RTLD_NOLOAD);
+        if (h) {
+            void* target = dlsym(h, "eglSwapBuffers");
+            if (target) {
+                safe_hook(target, (void*)hk_swap, (void**)&g_orig_swap);
+                g_hook_installed = true;
+                LOG("Hooked eglSwapBuffers successfully!");
+            }
+        }
+    }
+    return result;
+}
+
 extern "C" jint JNI_OnLoad(JavaVM* vm, void* reserved) {
     LOG("JNI_OnLoad called!");
     
     if (IL2::init()) {
         LOG("il2cpp base: %p", (void*)IL2::base);
-        // Хукаем GameController.get_Instance
         void* target = IL2::at(O::GameController_get_Instance);
         safe_hook(target, (void*)hk_get_inst, (void**)&orig_get_inst);
         LOG("GameController Hook installed!");
