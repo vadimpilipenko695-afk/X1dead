@@ -1,11 +1,13 @@
 #include <jni.h>
 #include <android/log.h>
+#include <android/input.h>
 #include <dlfcn.h>
 #include <link.h>
 #include <unistd.h>
 #include <sys/mman.h>
 #include <cstdint>
 #include <cstring>
+#include <cstdlib>
 #include <EGL/egl.h>
 #include <GLES3/gl3.h>
 #include "imgui/imgui.h"
@@ -31,7 +33,6 @@ namespace IL2 {
     inline void* at(uintptr_t rva) { return (void*)(base + rva); }
 }
 
-// --- Офсеты ---
 namespace O {
     constexpr uintptr_t GameController_get_Instance = 0x123C37C;
     constexpr uintptr_t GameController_PlayerController = 0x200;
@@ -135,23 +136,20 @@ extern "C" int32_t input_cb(AInputEvent* ev, void*) {
     return 0;
 }
 
-// Простой ручной хук без Dobby
-void hook_egl_swap() {
-    void* h = dlopen("libEGL.so", RTLD_NOW);
-    if (!h) return;
-    void* target = dlsym(h, "eglSwapBuffers");
+// Встроенный хук для arm64 (замена Dobby)
+void inline_hook(void* target, void* replace, void** origin) {
     if (!target) return;
-
     uintptr_t page_size = sysconf(_SC_PAGESIZE);
     uintptr_t page_start = (uintptr_t)target & ~(page_size - 1);
-    if (mprotect((void*)page_start, page_size * 2, PROT_READ | PROT_WRITE | PROT_EXEC) == 0) {
-        // x86_64/arm64 trampoline (очень грубый, но для теста сработает)
-        // Этот код заменяет первые байты функции на переход в наш hk_swap
-        // Но для arm64 надежнее использовать inline hooking. 
-        // Если это не сработает, мы просто откатимся к логам.
-        // Временно оставим пустым, чтобы собралось.
-        LOG("Hook target found at %p", target);
-    }
+    if (mprotect((void*)page_start, page_size * 2, PROT_READ | PROT_WRITE | PROT_EXEC) != 0) return;
+
+    uint32_t* p = (uint32_t*)target;
+    *origin = (void*)((uintptr_t)target + 16); // Сохраняем оригинал (упрощенно)
+
+    // ARM64: LDR X16, #8 ; BR X16 ; .quad replace
+    p[0] = 0x58000050; 
+    p[1] = 0xD61F0200;
+    *(uint64_t*)(target + 8) = (uint64_t)replace;
 }
 
 __attribute__((constructor))
@@ -162,5 +160,14 @@ void init() {
         usleep(50000);
     }
     IL2::init();
-    LOG("libx1dead ready! (no Dobby)");
+    
+    void* h = dlopen("libEGL.so", RTLD_NOW);
+    if (h) {
+        void* target = dlsym(h, "eglSwapBuffers");
+        if (target) {
+            inline_hook(target, (void*)hk_swap, (void**)&g_orig_swap);
+            LOG("Hook installed at %p", target);
+        }
+    }
+    LOG("libx1dead ready!");
 }
