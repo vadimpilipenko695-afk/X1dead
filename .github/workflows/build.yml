@@ -8,9 +8,16 @@ jobs:
       - uses: nttld/setup-ndk@v1
         with: { ndk-version: r25c }
       
-      - name: ImGui
+      - name: Download ImGui and KittyMemory
         run: |
-          git clone --depth=1 --branch v1.90.1 https://github.com/ocornut/imgui.git ImGui_temp
+          # Скачиваем ImGui
+          git clone --depth=1 --branch v1.90.1 https://github.com/ocornut/imgui.git ImGui
+          
+          # Скачиваем KittyMemory (от MrIkso)
+          git clone --depth=1 https://github.com/MrIkso/KittyMemory.git KittyMemory_temp
+          mv KittyMemory_temp/KittyMemory ./KittyMemory
+          mv KittyMemory_temp/Includes/* ./Includes/ 2>/dev/null || true
+          rm -rf KittyMemory_temp
           
       - name: NDK build
         run: |
