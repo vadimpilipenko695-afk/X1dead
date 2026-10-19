@@ -10,6 +10,7 @@
 #include <cstdlib>
 #include <EGL/egl.h>
 #include <GLES3/gl3.h>
+#include "And64InlineHook.hpp"
 #include "imgui/imgui.h"
 #include "imgui/backends/imgui_impl_opengl3.h"
 #include "imgui/backends/imgui_impl_android.h"
@@ -44,7 +45,6 @@ namespace O {
     constexpr uintptr_t Room_SetScore = 0x1370124;
     constexpr uintptr_t Room_SetRoundsCount = 0x13712A0;
     constexpr uintptr_t Room_SetCustomProperties = 0x1570F1C;
-    constexpr uintptr_t PlayerController_Update = 0x15B1994;
 }
 
 typedef void* (*GetInstFn)(void*);
@@ -134,49 +134,19 @@ EGLBoolean hk_swap(EGLDisplay d, EGLSurface s) {
     return g_orig_swap ? g_orig_swap(d, s) : EGL_FALSE;
 }
 
-void inline_hook(void* target, void* replace, void** origin) {
-    if (!target) return;
-    uintptr_t page_size = sysconf(_SC_PAGESIZE);
-    uintptr_t page_start = (uintptr_t)target & ~(page_size - 1);
-    if (mprotect((void*)page_start, page_size * 2, PROT_READ | PROT_WRITE | PROT_EXEC) != 0) return;
-
-    uint8_t* orig_code = (uint8_t*)malloc(16);
-    memcpy(orig_code, target, 16);
-    *origin = (void*)orig_code;
-
-    uint32_t* p = (uint32_t*)target;
-    p[0] = 0x58000050; 
-    p[1] = 0xD61F0200;
-    *(uint64_t*)((uintptr_t)target + 8) = (uint64_t)replace;
-    __builtin___clear_cache((char*)target, (char*)target + 16);
-}
-
-typedef void (*UpdateFn)(void*, void*);
-UpdateFn orig_update = nullptr;
-
-void hk_update(void* self, void* method) {
-    if (orig_update) orig_update(self, method);
+extern "C" jint JNI_OnLoad(JavaVM* vm, void* reserved) {
+    LOG("JNI_OnLoad called!");
     
-    static bool hooked_swap = false;
-    if (!hooked_swap) {
-        void* h = dlopen("libEGL.so", RTLD_NOW | RTLD_NOLOAD);
+    if (IL2::init()) {
+        void* h = dlopen("libEGL.so", RTLD_NOW);
         if (h) {
-            void* swap = dlsym(h, "eglSwapBuffers");
-            if (swap) {
-                inline_hook(swap, (void*)hk_swap, (void**)&g_orig_swap);
-                hooked_swap = true;
-                LOG("EGL hooked from Update!");
+            void* target = dlsym(h, "eglSwapBuffers");
+            if (target) {
+                A64HookFunction(target, (void*)hk_swap, (void**)&g_orig_swap);
+                LOG("Hook installed successfully!");
             }
         }
     }
-}
-
-extern "C" jint JNI_OnLoad(JavaVM* vm, void* reserved) {
-    LOG("JNI_OnLoad called!");
-    if (IL2::init()) {
-        void* target = IL2::at(O::PlayerController_Update);
-        inline_hook(target, (void*)hk_update, (void**)&orig_update);
-        LOG("Update Hook installed!");
-    }
+    
     return JNI_VERSION_1_6;
 }
