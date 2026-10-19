@@ -1,19 +1,12 @@
 #include <jni.h>
 #include <android/log.h>
-#include <android/input.h>
 #include <dlfcn.h>
 #include <link.h>
 #include <unistd.h>
-#include <sys/mman.h>
+#include <sys/stat.h>
 #include <cstdint>
 #include <cstring>
 #include <cstdlib>
-#include <EGL/egl.h>
-#include <GLES3/gl3.h>
-#include "And64InlineHook.hpp"
-#include "imgui/imgui.h"
-#include "imgui/backends/imgui_impl_opengl3.h"
-#include "imgui/backends/imgui_impl_android.h"
 
 #define LOG(...) __android_log_print(ANDROID_LOG_INFO, "x1dead", __VA_ARGS__)
 
@@ -31,7 +24,6 @@ namespace IL2 {
         }, &c);
         return c.found;
     }
-    inline void* at(uintptr_t rva) { return (void*)(base + rva); }
 }
 
 namespace O {
@@ -85,68 +77,32 @@ void apply_win(int score) {
     LOG("AutoWin applied: %d:0", score);
 }
 
-bool g_menu = false;
-int g_score = 8;
-bool g_imgui_ready = false;
-
-typedef EGLBoolean (*SwapFn)(EGLDisplay, EGLSurface);
-SwapFn g_orig_swap = nullptr;
-
-EGLBoolean hk_swap(EGLDisplay d, EGLSurface s) {
-    if (!g_imgui_ready) {
-        IMGUI_CHECKVERSION();
-        ImGui::CreateContext();
-        ImGui::GetIO().IniFilename = nullptr;
-        ImGui::StyleColorsDark();
-        ImGui_ImplOpenGL3_Init("#version 300 es");
-        ImGui_ImplAndroid_Init(nullptr);
-        g_imgui_ready = true;
-        LOG("ImGui Ready");
-    }
-
-    ImGui_ImplOpenGL3_NewFrame();
-    ImGui_ImplAndroid_NewFrame();
-    ImGui::NewFrame();
-
-    ImGui::SetNextWindowPos(ImVec2(20, 200), ImGuiCond_Always);
-    ImGui::SetNextWindowSize(ImVec2(60, 60), ImGuiCond_Always);
-    ImGui::Begin("##btn", nullptr, ImGuiWindowFlags_NoTitleBar | ImGuiWindowFlags_NoResize | ImGuiWindowFlags_NoScrollbar | ImGuiWindowFlags_NoMove | ImGuiWindowFlags_NoBackground);
-    if (ImGui::Button("X1", ImVec2(60, 60))) {
-        g_menu = !g_menu;
-    }
-    ImGui::End();
-
-    if (g_menu) {
-        ImGui::SetNextWindowSize(ImVec2(300, 150), ImGuiCond_FirstUseEver);
-        ImGui::Begin("by.x1dead", nullptr, ImGuiWindowFlags_NoCollapse);
-        ImGui::Text("StandRise AutoWin");
-        ImGui::Separator();
-        ImGui::SliderInt("Score", &g_score, 1, 16);
-        if (ImGui::Button("WIN NOW", ImVec2(280, 50))) {
-            apply_win(g_score);
+void* watch_thread(void*) {
+    while (true) {
+        if (access("/data/local/tmp/win_trigger", F_OK) != -1) {
+            LOG("Trigger detected! Applying win...");
+            apply_win(8);
+            unlink("/data/local/tmp/win_trigger"); // Удаляем файл
         }
-        ImGui::End();
+        sleep(1);
     }
-
-    ImGui::Render();
-    ImGui_ImplOpenGL3_RenderDrawData(ImGui::GetDrawData());
-
-    return g_orig_swap ? g_orig_swap(d, s) : EGL_FALSE;
+    return nullptr;
 }
 
-extern "C" jint JNI_OnLoad(JavaVM* vm, void* reserved) {
-    LOG("JNI_OnLoad called!");
+__attribute__((constructor))
+void init() {
+    LOG("libx1dead loaded (no imgui)!");
     
-    if (IL2::init()) {
-        void* h = dlopen("libEGL.so", RTLD_NOW);
-        if (h) {
-            void* target = dlsym(h, "eglSwapBuffers");
-            if (target) {
-                A64HookFunction(target, (void*)hk_swap, (void**)&g_orig_swap);
-                LOG("Hook installed successfully!");
-            }
-        }
+    // Ждем загрузки игры
+    for (int i = 0; i < 20; ++i) {
+        if (dlopen("libil2cpp.so", RTLD_NOW | RTLD_NOLOAD)) break;
+        sleep(1);
     }
     
-    return JNI_VERSION_1_6;
+    if (IL2::init()) {
+        LOG("il2cpp found. Starting watcher thread.");
+        pthread_t t;
+        pthread_create(&t, nullptr, watch_thread, nullptr);
+        pthread_detach(t);
+    }
 }
