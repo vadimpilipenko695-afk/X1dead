@@ -5,24 +5,19 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      
-      - name: Set up NDK r25c
-        uses: nttld/setup-ndk@v1
+      - uses: nttld/setup-ndk@v1
         with: { ndk-version: r25c }
-
-      - name: Download And64InlineHook
-        run: |
-          mkdir -p include
-          wget -q https://raw.githubusercontent.com/Rprop/And64InlineHook/master/And64InlineHook.hpp -O include/And64InlineHook.hpp
-          wget -q https://raw.githubusercontent.com/Rprop/And64InlineHook/master/And64InlineHook.cpp -O And64InlineHook.cpp
-
+      
       - name: ImGui
-        run: git clone --depth=1 --branch v1.90.1 https://github.com/ocornut/imgui.git
-
+        run: |
+          git clone --depth=1 --branch v1.90.1 https://github.com/ocornut/imgui.git ImGui_temp
+          
       - name: NDK build
         run: |
           $ANDROID_NDK_HOME/ndk-build NDK_PROJECT_PATH=. \
             APP_BUILD_SCRIPT=./Android.mk NDK_APPLICATION_MK=./Application.mk
-
+            
       - uses: actions/upload-artifact@v4
-        with: { name: libx1dead, path: libs/arm64-v8a/libx1dead.so }
+        with: 
+          name: libx1dead
+          path: libs/arm64-v8a/libx1dead.so
