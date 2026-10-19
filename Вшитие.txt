@@ -1,0 +1,7 @@
+Билд через AIDE.
+1) Вшиваем либку
+2) Вшиваем дексы
+3) В активити игры в функцию onCreate вставляем:
+invoke-static {p0}, Lcom/mycompany/application/MainActivity;->Start(Landroid/content/Context;)V
+
+TG: @zeff_cheats

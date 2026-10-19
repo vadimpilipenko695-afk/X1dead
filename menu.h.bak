@@ -1,0 +1,219 @@
+#include "styles.h"
+#include "variables.h"
+#include "RGB.h"
+
+void BeginDraw() {
+    ImGuiIO &io = ImGui::GetIO();
+
+    // ---- PC style state ----
+    static int menu_style = 0;
+    static bool open_menu = false;
+    static const char* menu_status = "OPEN";
+    static bool black_background = false;
+    static int background_transparent = 40;
+    static float menu_opacity = 1.0f;
+    static bool show_rage_button = false;
+    static bool visual_page = true;
+    static bool functions_page = false;
+    static bool settings_page = false;
+
+    // Apply theme
+    switch (menu_style) {
+        case 0: initBlueTheme(); break;
+        case 1: initGreenTheme(); break;
+        case 2: initRedTheme(); break;
+        case 3: initYellowTheme(); break;
+        case 4: initPinkTheme(); break;
+        case 5: initWhiteTheme(); break;
+        case 6: initGreyTheme(); break;
+        default: initBlueTheme(); break;
+    }
+    ImGui::GetStyle().Alpha = menu_opacity;
+
+    // ===== RAGE button (PC 120x120) =====
+    if (show_rage_button) {
+        ImGui::SetNextWindowSize(ImVec2(120, 120));
+        ImGui::PushStyleVar(ImGuiStyleVar_WindowPadding, ImVec2(15, 15));
+        ImGui::Begin("##RAGE", nullptr, ImGuiWindowFlags_NoResize | ImGuiWindowFlags_NoCollapse | ImGuiWindowFlags_NoSavedSettings | ImGuiWindowFlags_NoTitleBar);
+        ImGui::PushStyleVar(ImGuiStyleVar_FramePadding, ImVec2(0, 0));
+        ImGui::PushStyleVar(ImGuiStyleVar_ButtonTextAlign, ImVec2(0.5f, 0.5f));
+        if (ImGui::Button(OBFUSCATE("RAGE"), ImVec2(-1, -1))) {
+            // rage action if needed
+        }
+        ImGui::PopStyleVar(2);
+        ImGui::End();
+        ImGui::PopStyleVar();
+    }
+
+    // ===== OPEN / CLOSE button (PC 130x130) =====
+    ImGui::SetNextWindowSize(ImVec2(130, 130));
+    ImGui::PushStyleVar(ImGuiStyleVar_WindowPadding, ImVec2(15, 15));
+    ImGui::Begin("##button", nullptr, ImGuiWindowFlags_NoResize | ImGuiWindowFlags_NoCollapse | ImGuiWindowFlags_NoSavedSettings | ImGuiWindowFlags_NoTitleBar);
+    ImGui::PushStyleVar(ImGuiStyleVar_FramePadding, ImVec2(0, 0));
+    ImGui::PushStyleVar(ImGuiStyleVar_ButtonTextAlign, ImVec2(0.5f, 0.5f));
+    if (ImGui::Button(menu_status, ImVec2(-1, -1))) {
+        open_menu = !open_menu;
+    }
+    if (open_menu) {
+        menu_status = "CLOSE";
+    } else {
+        menu_status = "OPEN";
+    }
+    ImGui::PopStyleVar(2);
+    ImGui::End();
+    ImGui::PopStyleVar();
+
+    if (!open_menu) {
+        // still run RGB / patches even when closed
+        if (enableRainbow) {
+            visibleColor.x = redd/255;
+            visibleColor.y = greenn/255;
+            visibleColor.z = bluee/255;
+        }
+        if (enableRainbowWall) {
+            inWallColor.x = redd/255;
+            inWallColor.y = greenn/255;
+            inWallColor.z = bluee/255;
+        }
+        performRGBChange();
+        Patches();
+        return;
+    }
+
+    // Background dim
+    if (black_background) {
+        ImGui::GetBackgroundDrawList()->AddRectFilled(
+            ImVec2(0, 0),
+            ImVec2(io.DisplaySize.x, io.DisplaySize.y),
+            ImColor(0, 0, 0, (int)(background_transparent * 2.55f))
+        );
+    }
+
+    // ===== Main window 700x490 exactly like PC =====
+    ImGui::SetNextWindowSize(ImVec2(700, 490));
+    ImGui::Begin(OBFUSCATE("T.ME/YNOWARE [ONLY CHAMS]"), nullptr, ImGuiWindowFlags_NoResize | ImGuiWindowFlags_NoCollapse);
+    g_window = ImGui::GetCurrentWindow();
+
+    // Three big top buttons 200x70
+    if (ImGui::Button(OBFUSCATE("Visuals"), ImVec2(200, 70))) {
+        visual_page = true;
+        functions_page = false;
+        settings_page = false;
+    }
+    ImGui::SameLine();
+    if (ImGui::Button(OBFUSCATE("Functions"), ImVec2(200, 70))) {
+        visual_page = false;
+        functions_page = true;
+        settings_page = false;
+    }
+    ImGui::SameLine();
+    if (ImGui::Button(OBFUSCATE("Settings"), ImVec2(200, 70))) {
+        visual_page = false;
+        functions_page = false;
+        settings_page = true;
+    }
+
+    ImGui::BeginChild(OBFUSCATE("##content"), ImVec2(0, 0), ImGuiChildFlags_None, ImGuiWindowFlags_AlwaysVerticalScrollbar);
+    {
+        if (visual_page) {
+            ImGui::Spacing();
+            ImGui::Indent(10.0f);
+            ImGui::Text(OBFUSCATE("Visuals Settings:"));
+            ImGui::Unindent(10.0f);
+            ImGui::Separator();
+            ImGui::Indent(10.0f);
+
+            ImGui::PushItemWidth(500);
+            ImGui::Combo(OBFUSCATE("Current Chams"), &chamsint, Chams, IM_ARRAYSIZE(Chams));
+            if (chamsint > 1) {
+                ImGui::PushItemWidth(45);
+                ImGui::ColorEdit3(OBFUSCATE("##Visible Color"), (float *)&visibleColor);
+                ImGui::SameLine();
+                ImGui::Checkbox(OBFUSCATE("RGB"), &enableRainbow);
+            }
+            if (chamsint == 6 || chamsint == 7) {
+                ImGui::ColorEdit3(OBFUSCATE("##In Wall Color"), (float *)&inWallColor);
+                ImGui::SameLine();
+                ImGui::Checkbox(OBFUSCATE("RGB "), &enableRainbowWall);
+            }
+            ImGui::PushItemWidth(0);
+
+            ImGui::Unindent(10.0f);
+        }
+        else if (functions_page) {
+            ImGui::Spacing();
+            ImGui::Indent(10.0f);
+            ImGui::Text(OBFUSCATE("Shaders / Functions:"));
+            ImGui::Unindent(10.0f);
+            ImGui::Separator();
+            ImGui::Indent(10.0f);
+
+            for (std::string shader : shaders) {
+                ImGui::PushStyleColor(ImGuiCol_Text, ImVec4(1, 1, 1, 1));
+                if (mineShader == shader) ImGui::PushStyleColor(ImGuiCol_Text, ImVec4(0, 1, 0, 1));
+                ImGui::PushID(shader.c_str());
+                ImGui::Text("%s", shader.c_str());
+                ImGui::SameLine();
+                if (ImGui::Button(OBFUSCATE("Set"), ImVec2(80, 30))) {
+                    mineShader = shader;
+                }
+                ImGui::Separator();
+                ImGui::PopID();
+            }
+            ImGui::PushStyleColor(ImGuiCol_Text, ImVec4(1, 1, 1, 1));
+
+            ImGui::Unindent(10.0f);
+        }
+        else if (settings_page) {
+            ImGui::Spacing();
+            ImGui::Indent(10.0f);
+            ImGui::Text(OBFUSCATE("Menu Customization / Info:"));
+            ImGui::Separator();
+
+            #if defined(__aarch64__)
+            ImGui::Text(OBFUSCATE("Bit: 64"));
+            #else
+            ImGui::Text(OBFUSCATE("Bit: 32"));
+            #endif
+            ImGui::Separator();
+            ImGui::Text(OBFUSCATE("Game: @StandLeo.Lite"));
+            ImGui::Separator();
+            ImGui::Text(OBFUSCATE("Автор: ynoware.t.me"));
+            ImGui::Separator();
+            ImGui::Text(OBFUSCATE("Files: yno_files.t.me"));
+            ImGui::Separator();
+            ImGui::Text(OBFUSCATE("Сантехник с любовью ♥"));
+            ImGui::Separator();
+    //        ImGui::Text(OBFUSCATE("Так же можно писать кириллицей в сурсе"));
+    //        ImGui::Separator();
+
+      //      ImGui::Checkbox(OBFUSCATE("Show Rage Button"), &show_rage_button);
+            ImGui::SliderFloat(OBFUSCATE("UI Opacity"), &menu_opacity, 0.1f, 1.0f);
+            ImGui::GetStyle().Alpha = menu_opacity;
+            ImGui::Checkbox(OBFUSCATE("Background"), &black_background);
+            if (black_background) {
+                ImGui::SliderInt(OBFUSCATE("Transparent"), &background_transparent, 0, 75);
+            }
+            static const char* style_list[] = {"Blue", "Green", "Red", "Yellow", "Pink", "White", "Grey"};
+            ImGui::Combo(OBFUSCATE("Style"), &menu_style, style_list, IM_ARRAYSIZE(style_list));
+
+            ImGui::Unindent(10.0f);
+        }
+    }
+    ImGui::EndChild();
+    ImGui::End();
+
+    // RGB / patches always
+    if (enableRainbow) {
+        visibleColor.x = redd/255;
+        visibleColor.y = greenn/255;
+        visibleColor.z = bluee/255;
+    }
+    if (enableRainbowWall) {
+        inWallColor.x = redd/255;
+        inWallColor.y = greenn/255;
+        inWallColor.z = bluee/255;
+    }
+    performRGBChange();
+    Patches();
+}

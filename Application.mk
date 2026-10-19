@@ -1,4 +1,7 @@
-APP_ABI      := arm64-v8a
-APP_PLATFORM := android-24
-APP_STL      := c++_static
-APP_CPPFLAGS := -std=c++20 -O2 -fno-rtti -fno-exceptions
+APP_ABI := armeabi-v7a arm64-v8a
+APP_PLATFORM := android-28
+APP_STL := c++_static
+APP_OPTIM := release
+APP_THIN_ARCHIVE := true
+APP_PIE         := true
+
