@@ -3,14 +3,10 @@
 #include <unistd.h>
 #include <dlfcn.h>
 #include <pthread.h>
-#include <sys/mman.h>
-#include "ImGui/imgui.h"
-#include "ImGui/backends/imgui_impl_opengl3.h"
-#include "dobby.h"
+#include <string>
 
 #define LOG(...) __android_log_print(ANDROID_LOG_INFO, "x1dead", __VA_ARGS__)
 
-// Твои офсеты (вставил напрямую, без лишних файлов)
 #define O_GameController_get_Instance 0x123C37C
 #define O_GameController_PlayerController 0x200
 #define O_PC_Team 0x49
@@ -25,11 +21,7 @@
 
 uintptr_t base = 0;
 bool enable_aimbot = false;
-bool enable_autowin = false;
 
-// ==========================================
-// ФУНКЦИИ ОФСЕТОВ
-// ==========================================
 typedef void* (*GetInstFn)(void*);
 typedef void* (*GetRoomFn)(void*);
 typedef void (*SetScoreFn)(void*, void*, int, int);
@@ -70,23 +62,16 @@ void apply_win(int score) {
     LOG("AutoWin applied: %d:0", score);
 }
 
-// ==========================================
-// ХУК ДЛЯ АИМА
-// ==========================================
 typedef void (*CastBulletFn)(void*, void*, void*, void*);
 CastBulletFn orig_CastBullet;
 
 void hk_CastBullet(void* self, void* pos, void* dir, void* params) {
     if (enable_aimbot) {
-        // ТУТ БУДЕТ КОД АИМА (Пока просто пропускаем выстрел)
         LOG("Aimbot: Shot intercepted!");
     }
     orig_CastBullet(self, pos, dir, params);
 }
 
-// ==========================================
-// ПОТОК ОЖИДАНИЯ ИГРЫ
-// ==========================================
 void* hack_thread(void*) {
     LOG("Waiting for libil2cpp.so...");
     do {
@@ -101,36 +86,19 @@ void* hack_thread(void*) {
     return nullptr;
 }
 
-// ==========================================
-// JNI ИНТЕРФЕЙС ДЛЯ МЕНЮ (РИСУЕТСЯ В JAVA)
-// ==========================================
-extern "C" JNIEXPORT void JNICALL
-Java_com_mycompany_application_GLES3JNIView_step(JNIEnv* env, jobject obj) {
-    ImGui_ImplOpenGL3_NewFrame();
-    ImGui::NewFrame();
-    
-    ImGui::Begin("by.x1dead");
-    ImGui::Checkbox("Aimbot", &enable_aimbot);
-    if (ImGui::Button("AUTO WIN 8:0")) {
-        apply_win(8);
-    }
-    ImGui::End();
-    
-    ImGui::Render();
-    ImGui_ImplOpenGL3_RenderDrawData(ImGui::GetDrawData());
-}
-
-extern "C" JNIEXPORT void JNICALL
-Java_com_mycompany_application_GLES3JNIView_init(JNIEnv* env, jclass cls) {
-    IMGUI_CHECKVERSION();
-    ImGui::CreateContext();
-    ImGui::StyleColorsDark();
-    ImGui_ImplOpenGL3_Init("#version 300 es");
-}
-
 extern "C" jint JNI_OnLoad(JavaVM* vm, void* reserved) {
     pthread_t t;
     pthread_create(&t, NULL, hack_thread, NULL);
     pthread_detach(t);
     return JNI_VERSION_1_6;
+}
+
+// Вместо ImGui просто будем вызывать функции по команде из скрипта
+extern "C" JNIEXPORT void JNICALL
+Java_com_mycompany_application_GLES3JNIView_step(JNIEnv* env, jobject obj) {
+    // Ничего не рисуем, просто проверяем триггер
+    if (access("/data/local/tmp/win_trigger", F_OK) != -1) {
+        apply_win(8);
+        unlink("/data/local/tmp/win_trigger");
+    }
 }
