@@ -4,6 +4,7 @@
 #include <link.h>
 #include <unistd.h>
 #include <sys/stat.h>
+#include <pthread.h>
 #include <cstdint>
 #include <cstring>
 #include <cstdlib>
