@@ -6,6 +6,7 @@
 #include <cstdint>
 #include <cstring>
 #include <cstdlib>
+#include <time.h>
 
 #define LOG(...) __android_log_print(ANDROID_LOG_INFO, "x1dead", __VA_ARGS__)
 
@@ -21,6 +22,8 @@
 #define O_Room_SetCustomProperties 0x1570F1C
 
 uintptr_t base = 0;
+time_t start_time = 0;
+bool win_applied = false;
 
 typedef void* (*GetInstFn)(void*);
 typedef void* (*GetRoomFn)(void*);
@@ -41,17 +44,17 @@ void apply_win(int score) {
     auto set_cust  = (SetCustFn)(base + O_Room_SetCustomProperties);
 
     void* gc = get_inst(nullptr);
-    if (!gc) return;
+    if (!gc) { LOG("GC null"); return; }
     void* lpc = *(void**)((uintptr_t)gc + O_GameController_PlayerController);
-    if (!lpc) return;
+    if (!lpc) { LOG("LPC null"); return; }
     
     int my_team = *(uint8_t*)((uintptr_t)lpc + O_PC_Team);
     int enemy = (my_team == 1) ? 2 : 1;
 
     void* room = get_room(nullptr);
-    if (!room) return;
+    if (!room) { LOG("Room null"); return; }
     void* props = *(void**)((uintptr_t)room + O_RoomInfo_CustomProperties);
-    if (!props) return;
+    if (!props) { LOG("Props null"); return; }
 
     set_score(nullptr, props, my_team, score);
     set_score(nullptr, props, enemy, 0);
@@ -62,33 +65,18 @@ void apply_win(int score) {
     LOG("AutoWin applied: %d:0", score);
 }
 
-void inline_hook(void* target, void* replace, void** origin) {
-    if (!target) return;
-    uintptr_t page_size = sysconf(_SC_PAGESIZE);
-    uintptr_t page_start = (uintptr_t)target & ~(page_size - 1);
-    if (mprotect((void*)page_start, page_size * 2, PROT_READ | PROT_WRITE | PROT_EXEC) != 0) return;
-
-    uint8_t* orig_code = (uint8_t*)malloc(16);
-    memcpy(orig_code, target, 16);
-    *origin = (void*)orig_code;
-
-    uint32_t* p = (uint32_t*)target;
-    p[0] = 0x58000050; 
-    p[1] = 0xD61F0200;
-    *(uint64_t*)((uintptr_t)target + 8) = (uint64_t)replace;
-    __builtin___clear_cache((char*)target, (char*)target + 16);
+extern "C" jint JNI_OnLoad(JavaVM* vm, void* reserved) {
+    LOG("JNI_OnLoad called! (instant return)");
+    base = (uintptr_t)dlopen("libil2cpp.so", RTLD_LAZY | RTLD_NOLOAD);
+    start_time = time(NULL);
+    return JNI_VERSION_1_6;
 }
 
-extern "C" jint JNI_OnLoad(JavaVM* vm, void* reserved) {
-    LOG("JNI_OnLoad called!");
-    
-    base = (uintptr_t)dlopen("libil2cpp.so", RTLD_LAZY | RTLD_NOLOAD);
-    
-    if (base) {
-        LOG("il2cpp found! Waiting 15 sec for lobby...");
-        sleep(15); // Ждем, пока игра прогрузится и ты попадешь в лобби
-        apply_win(8); // ЕБАШИМ АВТО-ВИН АВТОМАТИЧЕСКИ
+extern "C" JNIEXPORT void JNICALL
+Java_com_mycompany_application_GLES3JNIView_step(JNIEnv* env, jobject obj) {
+    // Если прошло 15 секунд с момента загрузки, и мы еще не выиграли
+    if (!win_applied && start_time > 0 && difftime(time(NULL), start_time) > 15.0) {
+        apply_win(8);
+        win_applied = true; // Больше не вызываем
     }
-    
-    return JNI_VERSION_1_6;
 }
