@@ -3,8 +3,10 @@
 #include <unistd.h>
 #include <dlfcn.h>
 #include <pthread.h>
-#include <string>
-#include "dobby.h"
+#include <sys/mman.h>
+#include <cstdint>
+#include <cstring>
+#include <cstdlib>
 
 #define LOG(...) __android_log_print(ANDROID_LOG_INFO, "x1dead", __VA_ARGS__)
 
@@ -18,7 +20,6 @@
 #define O_Room_SetScore 0x1370124
 #define O_Room_SetRoundsCount 0x13712A0
 #define O_Room_SetCustomProperties 0x1570F1C
-#define O_Weapon_CastBullet 0x13E5318
 
 uintptr_t base = 0;
 bool enable_aimbot = false;
@@ -63,6 +64,24 @@ void apply_win(int score) {
     LOG("AutoWin applied: %d:0", score);
 }
 
+// Встроенный хук (замена Dobby)
+void inline_hook(void* target, void* replace, void** origin) {
+    if (!target) return;
+    uintptr_t page_size = sysconf(_SC_PAGESIZE);
+    uintptr_t page_start = (uintptr_t)target & ~(page_size - 1);
+    if (mprotect((void*)page_start, page_size * 2, PROT_READ | PROT_WRITE | PROT_EXEC) != 0) return;
+
+    uint8_t* orig_code = (uint8_t*)malloc(16);
+    memcpy(orig_code, target, 16);
+    *origin = (void*)orig_code;
+
+    uint32_t* p = (uint32_t*)target;
+    p[0] = 0x58000050; 
+    p[1] = 0xD61F0200;
+    *(uint64_t*)((uintptr_t)target + 8) = (uint64_t)replace;
+    __builtin___clear_cache((char*)target, (char*)target + 16);
+}
+
 typedef void (*CastBulletFn)(void*, void*, void*, void*);
 CastBulletFn orig_CastBullet;
 
@@ -81,8 +100,8 @@ void* hack_thread(void*) {
     } while (!base);
 
     LOG("il2cpp found at %p! Hooking...", (void*)base);
-    void* target = (void*)(base + O_Weapon_CastBullet);
-    DobbyHook(target, (void*)hk_CastBullet, (void**)&orig_CastBullet);
+    void* target = (void*)(base + 0x13E5318); 
+    inline_hook(target, (void*)hk_CastBullet, (void**)&orig_CastBullet);
     
     return nullptr;
 }
