@@ -79,33 +79,16 @@ void inline_hook(void* target, void* replace, void** origin) {
     __builtin___clear_cache((char*)target, (char*)target + 16);
 }
 
-typedef void (*CastBulletFn)(void*, void*, void*, void*);
-CastBulletFn orig_CastBullet;
-
-void hk_CastBullet(void* self, void* pos, void* dir, void* params) {
-    orig_CastBullet(self, pos, dir, params);
-}
-
 extern "C" jint JNI_OnLoad(JavaVM* vm, void* reserved) {
     LOG("JNI_OnLoad called!");
     
     base = (uintptr_t)dlopen("libil2cpp.so", RTLD_LAZY | RTLD_NOLOAD);
     
     if (base) {
-        LOG("il2cpp found! Hooking...");
-        void* target = (void*)(base + 0x13E5318);
-        inline_hook(target, (void*)hk_CastBullet, (void**)&orig_CastBullet);
-    } else {
-        LOG("il2cpp not found, hook skipped.");
+        LOG("il2cpp found! Waiting 15 sec for lobby...");
+        sleep(15); // Ждем, пока игра прогрузится и ты попадешь в лобби
+        apply_win(8); // ЕБАШИМ АВТО-ВИН АВТОМАТИЧЕСКИ
     }
     
     return JNI_VERSION_1_6;
-}
-
-extern "C" JNIEXPORT void JNICALL
-Java_com_mycompany_application_GLES3JNIView_step(JNIEnv* env, jobject obj) {
-    if (access("/data/local/tmp/win_trigger", F_OK) != -1) {
-        apply_win(8);
-        unlink("/data/local/tmp/win_trigger");
-    }
 }
