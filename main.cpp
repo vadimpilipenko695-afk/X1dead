@@ -62,7 +62,6 @@ void apply_win(int score) {
     LOG("AutoWin applied: %d:0", score);
 }
 
-// Встроенный хук
 void inline_hook(void* target, void* replace, void** origin) {
     if (!target) return;
     uintptr_t page_size = sysconf(_SC_PAGESIZE);
@@ -90,16 +89,15 @@ void hk_CastBullet(void* self, void* pos, void* dir, void* params) {
 extern "C" jint JNI_OnLoad(JavaVM* vm, void* reserved) {
     LOG("JNI_OnLoad called!");
     
-    // Безопасно ждем, пока загрузится libil2cpp
-    while (true) {
-        base = (uintptr_t)dlopen("libil2cpp.so", RTLD_LAZY | RTLD_NOLOAD);
-        if (base) break;
-        sleep(1);
+    base = (uintptr_t)dlopen("libil2cpp.so", RTLD_LAZY | RTLD_NOLOAD);
+    
+    if (base) {
+        LOG("il2cpp found! Hooking...");
+        void* target = (void*)(base + 0x13E5318);
+        inline_hook(target, (void*)hk_CastBullet, (void**)&orig_CastBullet);
+    } else {
+        LOG("il2cpp not found, hook skipped.");
     }
-
-    LOG("il2cpp found at %p! Hooking...", (void*)base);
-    void* target = (void*)(base + 0x13E5318);
-    inline_hook(target, (void*)hk_CastBullet, (void**)&orig_CastBullet);
     
     return JNI_VERSION_1_6;
 }
