@@ -4,7 +4,6 @@
 #include <link.h>
 #include <unistd.h>
 #include <sys/stat.h>
-#include <pthread.h>
 #include <cstdint>
 #include <cstring>
 #include <cstdlib>
@@ -49,6 +48,8 @@ typedef void (*SetTimeFn)(void*, void*, double);
 typedef void (*SetCustFn)(void*, void*, void*, void*);
 
 void apply_win(int score) {
+    if (!IL2::init()) return; // Ищем libil2cpp прямо перед выполнением
+
     auto get_inst = (GetInstFn)(IL2::base + O::GameController_get_Instance);
     auto get_room = (GetRoomFn)(IL2::base + O::PhotonNetwork_GetRoom);
     auto set_score = (SetScoreFn)(IL2::base + O::Room_SetScore);
@@ -58,16 +59,19 @@ void apply_win(int score) {
     auto set_cust  = (SetCustFn)(IL2::base + O::Room_SetCustomProperties);
 
     void* gc = get_inst(nullptr);
-    if (!gc) return;
+    if (!gc) { LOG("GameController is null!"); return; }
+    
     void* lpc = *(void**)((uintptr_t)gc + O::GameController_PlayerController);
-    if (!lpc) return;
+    if (!lpc) { LOG("PlayerController is null!"); return; }
+    
     int my_team = *(uint8_t*)((uintptr_t)lpc + O::PC_Team);
     int enemy = (my_team == 1) ? 2 : 1;
 
     void* room = get_room(nullptr);
-    if (!room) return;
+    if (!room) { LOG("Room is null!"); return; }
+    
     void* props = *(void**)((uintptr_t)room + O::RoomInfo_CustomProperties);
-    if (!props) return;
+    if (!props) { LOG("Props is null!"); return; }
 
     set_score(nullptr, props, my_team, score);
     set_score(nullptr, props, enemy, 0);
@@ -90,20 +94,14 @@ void* watch_thread(void*) {
     return nullptr;
 }
 
-__attribute__((constructor))
-void init() {
-    LOG("libx1dead loaded (no imgui)!");
+extern "C" jint JNI_OnLoad(JavaVM* vm, void* reserved) {
+    LOG("JNI_OnLoad called! Starting watcher...");
     
-    // Ждем загрузки игры
-    for (int i = 0; i < 20; ++i) {
-        if (dlopen("libil2cpp.so", RTLD_NOW | RTLD_NOLOAD)) break;
-        sleep(1);
-    }
+    // Создаем поток для слежки за триггером. 
+    // Это безопасно, так как мы ничего не читаем из игры прямо сейчас.
+    pthread_t t;
+    pthread_create(&t, nullptr, watch_thread, nullptr);
+    pthread_detach(t);
     
-    if (IL2::init()) {
-        LOG("il2cpp found. Starting watcher thread.");
-        pthread_t t;
-        pthread_create(&t, nullptr, watch_thread, nullptr);
-        pthread_detach(t);
-    }
+    return JNI_VERSION_1_6;
 }
