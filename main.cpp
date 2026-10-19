@@ -1,76 +1,136 @@
 #include <jni.h>
-#include <android/native_activity.h>
+#include <android/log.h>
 #include <unistd.h>
 #include <dlfcn.h>
+#include <pthread.h>
 #include <sys/mman.h>
 #include "ImGui/imgui.h"
 #include "ImGui/backends/imgui_impl_opengl3.h"
-#include "Includes/Dobby/dobby.h" // Тот самый Dobby из папки
+#include "dobby.h"
 
-// Твои офсеты (из твоего файла)
-#define OFFSET_GAMECONTROLLER_GETINSTANCE 0x123C37C
-#define OFFSET_GAMECONTROLLER_PC 0x200
-#define OFFSET_PC_TEAM 0x49
-#define OFFSET_PC_AIMCTRL 0x50
-#define OFFSET_AIM_DATA 0x90
-#define OFFSET_AIM_PITCH 0x18
-#define OFFSET_AIM_YAW 0x28
+#define LOG(...) __android_log_print(ANDROID_LOG_INFO, "x1dead", __VA_ARGS__)
 
-#define OFFSET_WEAPON_CASTBULLET 0x13E5318
-#define OFFSET_PLAYER_HEALTH_GET 0x15AE474
-#define OFFSET_ANIM_STATE 0x128 // Заглушка
+// Твои офсеты (вставил напрямую, без лишних файлов)
+#define O_GameController_get_Instance 0x123C37C
+#define O_GameController_PlayerController 0x200
+#define O_PC_Team 0x49
+#define O_PhotonNetwork_GetRoom 0x18D80F0
+#define O_RoomInfo_CustomProperties 0x18
+#define O_Room_SetTime 0x136F67C
+#define O_Room_SetRound 0x136F798
+#define O_Room_SetScore 0x1370124
+#define O_Room_SetRoundsCount 0x13712A0
+#define O_Room_SetCustomProperties 0x1570F1C
+#define O_Weapon_CastBullet 0x13E5318
 
 uintptr_t base = 0;
+bool enable_aimbot = false;
+bool enable_autowin = false;
 
-extern bool aimbot_enabled;
-extern bool no_recoil_enabled;
-extern bool autowin_enabled;
+// ==========================================
+// ФУНКЦИИ ОФСЕТОВ
+// ==========================================
+typedef void* (*GetInstFn)(void*);
+typedef void* (*GetRoomFn)(void*);
+typedef void (*SetScoreFn)(void*, void*, int, int);
+typedef void (*SetRoundFn)(void*, void*, int);
+typedef void (*SetRcFn)(void*, void*, int);
+typedef void (*SetTimeFn)(void*, void*, double);
+typedef void (*SetCustFn)(void*, void*, void*, void*);
 
-// Ищем базу libil2cpp
-void* get_il2cpp() {
-    return dlopen("libil2cpp.so", RTLD_LAZY);
-}
-
-// Функция Авто-Вина
-void DoAutoWin() {
+void apply_win(int score) {
     if (!base) return;
-    
-    // Вызов GameController.getInstance()
-    auto getInst = (void*(*)(void*))(base + OFFSET_GAMECONTROLLER_GETINSTANCE);
-    void* gc = getInst(nullptr);
+    auto get_inst = (GetInstFn)(base + O_GameController_get_Instance);
+    auto get_room = (GetRoomFn)(base + O_PhotonNetwork_GetRoom);
+    auto set_score = (SetScoreFn)(base + O_Room_SetScore);
+    auto set_round = (SetRoundFn)(base + O_Room_SetRound);
+    auto set_rc    = (SetRcFn)(base + O_Room_SetRoundsCount);
+    auto set_time  = (SetTimeFn)(base + O_Room_SetTime);
+    auto set_cust  = (SetCustFn)(base + O_Room_SetCustomProperties);
+
+    void* gc = get_inst(nullptr);
     if (!gc) return;
-
-    void* lpc = *(void**)((uintptr_t)gc + OFFSET_GAMECONTROLLER_PC);
+    void* lpc = *(void**)((uintptr_t)gc + O_GameController_PlayerController);
     if (!lpc) return;
+    
+    int my_team = *(uint8_t*)((uintptr_t)lpc + O_PC_Team);
+    int enemy = (my_team == 1) ? 2 : 1;
 
-    // Тут мы должны дернуть Room_SetScore, но для простоты мы просто сделаем телепорт или урон.
-    // (В идеале нужно вставить тот код, что я писал для autowin.cpp)
+    void* room = get_room(nullptr);
+    if (!room) return;
+    void* props = *(void**)((uintptr_t)room + O_RoomInfo_CustomProperties);
+    if (!props) return;
+
+    set_score(nullptr, props, my_team, score);
+    set_score(nullptr, props, enemy, 0);
+    set_round(nullptr, props, score);
+    set_rc   (nullptr, props, score);
+    set_time (nullptr, props, 0.0);
+    set_cust (room, props, nullptr, nullptr);
+    LOG("AutoWin applied: %d:0", score);
 }
 
-// Хук на выстрел (для Аима)
+// ==========================================
+// ХУК ДЛЯ АИМА
+// ==========================================
 typedef void (*CastBulletFn)(void*, void*, void*, void*);
 CastBulletFn orig_CastBullet;
 
 void hk_CastBullet(void* self, void* pos, void* dir, void* params) {
-    if (aimbot_enabled && base) {
-        // Тут логика Silent Aim: мы должны найти врага и подменить вектор dir.
-        // (В идеале нужно вставить код из aim.cpp)
+    if (enable_aimbot) {
+        // ТУТ БУДЕТ КОД АИМА (Пока просто пропускаем выстрел)
+        LOG("Aimbot: Shot intercepted!");
     }
     orig_CastBullet(self, pos, dir, params);
 }
 
-// Инициализация
-__attribute__((constructor))
-void init() {
-    base = (uintptr_t)get_il2cpp();
-    if (base) {
-        // Вешаем хук на выстрел
-        void* target = (void*)(base + OFFSET_WEAPON_CASTBULLET);
-        DobbyHook(target, (void*)hk_CastBullet, (void**)&orig_CastBullet);
-    }
+// ==========================================
+// ПОТОК ОЖИДАНИЯ ИГРЫ
+// ==========================================
+void* hack_thread(void*) {
+    LOG("Waiting for libil2cpp.so...");
+    do {
+        base = (uintptr_t)dlopen("libil2cpp.so", RTLD_LAZY | RTLD_NOLOAD);
+        sleep(1);
+    } while (!base);
+
+    LOG("il2cpp found at %p! Hooking...", (void*)base);
+    void* target = (void*)(base + O_Weapon_CastBullet);
+    DobbyHook(target, (void*)hk_CastBullet, (void**)&orig_CastBullet);
+    
+    return nullptr;
 }
 
-// Функция отрисовки вызывается из Java
-void DrawMenu() {
-    if (autowin_enabled) DoAutoWin();
+// ==========================================
+// JNI ИНТЕРФЕЙС ДЛЯ МЕНЮ (РИСУЕТСЯ В JAVA)
+// ==========================================
+extern "C" JNIEXPORT void JNICALL
+Java_com_mycompany_application_GLES3JNIView_step(JNIEnv* env, jobject obj) {
+    ImGui_ImplOpenGL3_NewFrame();
+    ImGui::NewFrame();
+    
+    ImGui::Begin("by.x1dead");
+    ImGui::Checkbox("Aimbot", &enable_aimbot);
+    if (ImGui::Button("AUTO WIN 8:0")) {
+        apply_win(8);
+    }
+    ImGui::End();
+    
+    ImGui::Render();
+    ImGui_ImplOpenGL3_RenderDrawData(ImGui::GetDrawData());
+}
+
+extern "C" JNIEXPORT void JNICALL
+Java_com_mycompany_application_GLES3JNIView_init(JNIEnv* env, jclass cls) {
+    IMGUI_CHECKVERSION();
+    ImGui::CreateContext();
+    ImGui::StyleColorsDark();
+    ImGui_ImplOpenGL3_Init("#version 300 es");
+}
+
+extern "C" jint JNI_OnLoad(JavaVM* vm, void* reserved) {
+    pthread_t t;
+    pthread_create(&t, NULL, hack_thread, NULL);
+    pthread_detach(t);
+    return JNI_VERSION_1_6;
 }
