@@ -2,7 +2,6 @@
 #include <android/log.h>
 #include <unistd.h>
 #include <dlfcn.h>
-#include <pthread.h>
 #include <sys/mman.h>
 #include <cstdint>
 #include <cstring>
@@ -22,7 +21,6 @@
 #define O_Room_SetCustomProperties 0x1570F1C
 
 uintptr_t base = 0;
-bool enable_aimbot = false;
 
 typedef void* (*GetInstFn)(void*);
 typedef void* (*GetRoomFn)(void*);
@@ -64,7 +62,7 @@ void apply_win(int score) {
     LOG("AutoWin applied: %d:0", score);
 }
 
-// Встроенный хук (замена Dobby)
+// Встроенный хук
 void inline_hook(void* target, void* replace, void** origin) {
     if (!target) return;
     uintptr_t page_size = sysconf(_SC_PAGESIZE);
@@ -86,30 +84,23 @@ typedef void (*CastBulletFn)(void*, void*, void*, void*);
 CastBulletFn orig_CastBullet;
 
 void hk_CastBullet(void* self, void* pos, void* dir, void* params) {
-    if (enable_aimbot) {
-        LOG("Aimbot: Shot intercepted!");
-    }
     orig_CastBullet(self, pos, dir, params);
 }
 
-void* hack_thread(void*) {
-    LOG("Waiting for libil2cpp.so...");
-    do {
+extern "C" jint JNI_OnLoad(JavaVM* vm, void* reserved) {
+    LOG("JNI_OnLoad called!");
+    
+    // Безопасно ждем, пока загрузится libil2cpp
+    while (true) {
         base = (uintptr_t)dlopen("libil2cpp.so", RTLD_LAZY | RTLD_NOLOAD);
+        if (base) break;
         sleep(1);
-    } while (!base);
+    }
 
     LOG("il2cpp found at %p! Hooking...", (void*)base);
-    void* target = (void*)(base + 0x13E5318); 
+    void* target = (void*)(base + 0x13E5318);
     inline_hook(target, (void*)hk_CastBullet, (void**)&orig_CastBullet);
     
-    return nullptr;
-}
-
-extern "C" jint JNI_OnLoad(JavaVM* vm, void* reserved) {
-    pthread_t t;
-    pthread_create(&t, NULL, hack_thread, NULL);
-    pthread_detach(t);
     return JNI_VERSION_1_6;
 }
 
