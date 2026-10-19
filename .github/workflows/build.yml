@@ -7,16 +7,11 @@ jobs:
       - uses: actions/checkout@v4
       - uses: nttld/setup-ndk@v1
         with: { ndk-version: r25c }
-      
       - name: Download ImGui
-        run: |
-          git clone --depth=1 --branch v1.90.1 https://github.com/ocornut/imgui.git ImGui
-
+        run: git clone --depth=1 --branch v1.90.1 https://github.com/ocornut/imgui.git ImGui
       - name: NDK build
         run: |
-          $ANDROID_NDK_HOME/ndk-build NDK_PROJECT_PATH=. \
-            APP_BUILD_SCRIPT=./Android.mk NDK_APPLICATION_MK=./Application.mk
-            
+          $ANDROID_NDK_HOME/ndk-build NDK_PROJECT_PATH=. APP_BUILD_SCRIPT=./Android.mk NDK_APPLICATION_MK=./Application.mk
       - uses: actions/upload-artifact@v4
         with: 
           name: libx1dead
