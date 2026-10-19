@@ -6,11 +6,9 @@ include $(PREBUILT_STATIC_LIBRARY)
 
 include $(CLEAR_VARS)
 LOCAL_MODULE    := x1dead
-LOCAL_SRC_FILES := main.cpp \
-    ImGui/imgui.cpp ImGui/imgui_draw.cpp ImGui/imgui_tables.cpp ImGui/imgui_widgets.cpp \
-    ImGui/backends/imgui_impl_opengl3.cpp
-LOCAL_C_INCLUDES := $(LOCAL_PATH) $(LOCAL_PATH)/ImGui
+LOCAL_SRC_FILES := main.cpp
+LOCAL_C_INCLUDES := $(LOCAL_PATH)
 LOCAL_CPPFLAGS   := -std=c++20 -O2
-LOCAL_LDLIBS     := -llog -landroid -lEGL -lGLESv3 -ldl
+LOCAL_LDLIBS     := -llog -landroid -ldl
 LOCAL_STATIC_LIBRARIES := dobby
 include $(BUILD_SHARED_LIBRARY)
